@@ -8,3 +8,4 @@ pandas
 scipy
 netCDF4
 httpx
+python-multipart
