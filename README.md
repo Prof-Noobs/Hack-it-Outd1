@@ -2,6 +2,7 @@
 
 DEMO DATA BASE LINK = https://drive.google.com/uc?export=download&id=1fiaT0wUEIyr7CUScxCPCnFXH3NlVXC4n
 DEMO VIDEO LINK = https://youtu.be/awcHo542ba8
+PROTOTYPE LINK(THE ONE IN GOOGLE FORM IS OLDER VERION)= https://hack-it-outd1.vercel.app/
 
 
 
