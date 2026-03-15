@@ -2,7 +2,7 @@
 
 DEMO DATA BASE LINK = https://drive.google.com/uc?export=download&id=1fiaT0wUEIyr7CUScxCPCnFXH3NlVXC4n
 DEMO VIDEO LINK = https://youtu.be/awcHo542ba8
-PROTOTYPE URL (THE ONE SUBMITTED IN GOOGLE FORM IS OLDER VERSION) = https://hack-it-outd1.vercel.app/
+
 
 
 **CESM Climate Data Visualisation · Technex '26 · IIT (BHU) Varanasi**
