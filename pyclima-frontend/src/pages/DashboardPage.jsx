@@ -17,7 +17,7 @@ import { useClimateData } from '../hooks/useClimateData';
 import { COLOR_SCALES } from '../utils/colorScale';
 import { filterPoints, filterGrid } from '../utils/regions';
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 const VAR_META = {
   temperature:   { label: 'Temperature',   unit: '°C',   icon: '🌡', color: '#f87171' },
@@ -25,14 +25,11 @@ const VAR_META = {
   wind:          { label: 'Wind Speed',    unit: 'm/s',  icon: '💨', color: '#a78bfa' },
 };
 
+// ── Helper components ─────────────────────────────────────────────────────────
 function Section({ title, children }) {
   return (
     <div>
-      <div style={{
-        fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--aurora-cyan)',
-        letterSpacing: '0.2em', marginBottom: '12px', paddingBottom: '8px',
-        borderBottom: '1px solid var(--border-subtle)', textTransform: 'uppercase'
-      }}>{title}</div>
+      <div style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--aurora-cyan)', letterSpacing: '0.2em', marginBottom: '12px', paddingBottom: '8px', borderBottom: '1px solid var(--border-subtle)', textTransform: 'uppercase' }}>{title}</div>
       {children}
     </div>
   );
@@ -56,10 +53,7 @@ function ColorBar({ scaleName, vmin, vmax, units }) {
 const ChartTip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="glass-panel" style={{
-      padding: '10px 14px', border: '1px solid var(--aurora-cyan-dim)',
-      boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
-    }}>
+    <div className="glass-panel" style={{ padding: '10px 14px', border: '1px solid var(--aurora-cyan-dim)', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
       <div style={{ color: 'var(--aurora-cyan)', fontFamily: 'var(--font-mono)', fontSize: '11px', letterSpacing: '0.1em' }}>YEAR: {label}</div>
       <div style={{ color: '#fff', fontSize: '16px', fontWeight: 600, marginTop: '4px', fontFamily: 'var(--font-display)' }}>{payload[0].value?.toFixed?.(3)}</div>
     </div>
@@ -77,14 +71,12 @@ function CoordPopup({ info, onClose }) {
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px', padding: '4px' }}>✕</button>
       </div>
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>LAT:</span> <span style={{ color: 'var(--text-main)' }}>{info.lat}°</span></div>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>LON:</span> <span style={{ color: 'var(--text-main)' }}>{info.lon}°</span></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>LAT:</span><span style={{ color: 'var(--text-main)' }}>{info.lat}°</span></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>LON:</span><span style={{ color: 'var(--text-main)' }}>{info.lon}°</span></div>
         {info.value !== undefined && (
           <div style={{ marginTop: '8px', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>VALUE:</span>
-            <span style={{ color: 'var(--aurora-cyan)', fontWeight: 600, fontSize: '14px' }}>
-              {info.value} <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{info.units}</span>
-            </span>
+            <span style={{ color: 'var(--aurora-cyan)', fontWeight: 600, fontSize: '14px' }}>{info.value} <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{info.units}</span></span>
           </div>
         )}
       </div>
@@ -112,40 +104,89 @@ function ExplainPanel({ text, onClose, loading }) {
   );
 }
 
-function UploadOverlay({ onFile, loading, error, backendOk }) {
+// ── Upload Overlay with Demo button ──────────────────────────────────────────
+function UploadOverlay({ onFile, onDemo, loading, demoLoading, error, backendOk }) {
   const fileRef = useRef();
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(11, 11, 19, 0.85)', backdropFilter: 'blur(12px)' }}>
       <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="glass-panel" style={{ padding: '60px', textAlign: 'center', maxWidth: '480px' }}>
+        className="glass-panel" style={{ padding: '60px', textAlign: 'center', maxWidth: '500px', position: 'relative' }}>
+
+        {/* Glow orb */}
         <div style={{ position: 'absolute', top: -30, left: '50%', transform: 'translateX(-50%)', width: 100, height: 100, borderRadius: '50%', background: 'var(--aurora-cyan-dim)', filter: 'blur(40px)', zIndex: -1 }} />
+
+        {/* Backend offline warning */}
         {!backendOk && (
           <div style={{ marginBottom: '24px', padding: '12px', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: '8px', fontSize: '13px', color: '#f87171', fontFamily: 'var(--font-mono)' }}>
-            SYSTEM FAULT: Backend offline at :8000<br />
+            SYSTEM FAULT: Backend offline<br />
             <span style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '6px', display: 'block' }}>{'>'} uvicorn api:app --reload --port 8000</span>
           </div>
         )}
+
         <div style={{ fontSize: '48px', marginBottom: '20px', filter: 'drop-shadow(0 0 20px var(--aurora-cyan-dim))' }}>🌍</div>
         <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 800, marginBottom: '16px', letterSpacing: '-0.02em', color: '#fff' }}>
           Initialize Data Matrix
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '15px', lineHeight: 1.6, marginBottom: '32px' }}>
-          Upload a CESM NetCDF (.nc) file to visualize multi-dimensional climate matrices including Temperature, Precipitation, and Wind variables.
+          Visualize multi-dimensional climate data including Temperature, Precipitation, and Wind from CESM1-LENS (1920–2018).
         </p>
+
         {error && (
           <div style={{ marginBottom: '20px', padding: '10px', background: 'rgba(255, 0, 127, 0.1)', border: '1px solid var(--aurora-magenta-dim)', borderRadius: '8px', fontSize: '13px', color: 'var(--aurora-magenta)', fontFamily: 'var(--font-mono)' }}>
             [ ERR ] {error}
           </div>
         )}
-        <button className="btn-aurora btn-aurora-solid" onClick={() => fileRef.current.click()}
-          disabled={loading || !backendOk}
-          style={{ fontSize: '15px', padding: '16px 32px', width: '100%', justifyContent: 'center' }}>
-          {loading ? 'UPLOADING...' : 'CHOOSE .NC FILE'}
+
+        {/* ── Try Demo button ── */}
+        <button
+          onClick={onDemo}
+          disabled={demoLoading || loading || !backendOk}
+          style={{
+            fontSize: '15px', padding: '16px 32px', width: '100%', marginBottom: '12px',
+            borderRadius: '12px', cursor: demoLoading || !backendOk ? 'not-allowed' : 'pointer',
+            border: '1px solid var(--aurora-cyan)',
+            background: 'var(--aurora-cyan-dim)',
+            color: 'var(--aurora-cyan)',
+            fontFamily: 'var(--font-display)', fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+            transition: 'all 0.2s',
+            boxShadow: '0 0 24px rgba(0,240,255,0.2)',
+            opacity: !backendOk ? 0.4 : 1,
+          }}
+          onMouseEnter={e => { if (!demoLoading && backendOk) e.currentTarget.style.background = 'rgba(0,240,255,0.2)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'var(--aurora-cyan-dim)'; }}
+        >
+          {demoLoading ? (
+            <>
+              <div style={{ width: 16, height: 16, border: '2px solid var(--aurora-cyan)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+              LOADING DEMO DATASET...
+            </>
+          ) : (
+            <>🚀 TRY DEMO DATASET</>
+          )}
+        </button>
+
+        {/* Demo dataset info */}
+        {!demoLoading && (
+          <div style={{ marginBottom: '16px', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}>
+            CESM1-LENS · 1920–2018 · TEMP · PRECIP · WIND
+          </div>
+        )}
+
+        {/* Divider */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '8px 0 12px' }}>
+          <div style={{ flex: 1, height: '1px', background: 'var(--border-subtle)' }} />
+          <span style={{ color: 'var(--text-muted)', fontSize: '11px', fontFamily: 'var(--font-mono)' }}>OR UPLOAD YOUR OWN</span>
+          <div style={{ flex: 1, height: '1px', background: 'var(--border-subtle)' }} />
+        </div>
+
+        {/* Upload own file */}
+        <button className="btn-aurora" onClick={() => fileRef.current.click()}
+          disabled={loading || demoLoading || !backendOk}
+          style={{ fontSize: '14px', padding: '14px 32px', width: '100%', justifyContent: 'center', opacity: !backendOk ? 0.4 : 1 }}>
+          {loading ? 'UPLOADING...' : '↑ UPLOAD .NC FILE'}
         </button>
         <input ref={fileRef} type="file" accept=".nc" style={{ display: 'none' }} onChange={e => onFile(e.target.files[0])} />
-        <div className="mono" style={{ marginTop: '24px', fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
-          VARIABLES DETECTED: <span className="cyan">TEMP</span> · <span className="cyan">PRECIP</span> · <span className="cyan">WIND</span>
-        </div>
       </motion.div>
     </div>
   );
@@ -156,29 +197,31 @@ export default function DashboardPage() {
   const {
     fileInfo, variables, timeSteps, heatData,
     loading, error, uploadFile, fetchData, fetchCompare,
-    fetchCityCompare, fetchPoint, checkHealth,
+    fetchCityCompare, fetchPoint, checkHealth, loadDemo,
     chatMessages, chatLoading, sendChat, clearChat, explainGraph,
     hasFile,
   } = useClimateData();
 
-  const [is3D,         setIs3D]        = useState(true);
-  const [showHeatmap,  setShowHeatmap] = useState(true);
-  const [selVar,       setSelVar]      = useState('temperature');
-  const [timeIdx,      setTimeIdx]     = useState(0);
-  const [colorScale,   setColorScale]  = useState('RdBu');
-  const [playing,      setPlaying]     = useState(false);
-  const [speed,        setSpeed]       = useState(1);
-  const [clickInfo,    setClickInfo]   = useState(null);
-  const [backendOk,    setBackendOk]   = useState(true);
-  const [showCompare,  setCompare]     = useState(false);
-  const [showCities,   setCities]      = useState(false);
-  const [showChat,     setShowChat]    = useState(false);
-  const [healthInfo,   setHealthInfo]  = useState({});
-  const [region,       setRegion]      = useState('Global');
-  const [explanation,  setExplanation] = useState('');
-  const [explainLoading, setExplainLoad] = useState(false);
-  const [showExplain,  setShowExplain] = useState(false);
-  const [pdfLoading,   setPdfLoading]  = useState(false);
+  const [is3D,          setIs3D]         = useState(true);
+  const [showHeatmap,   setShowHeatmap]  = useState(true);
+  const [selVar,        setSelVar]       = useState('temperature');
+  const [timeIdx,       setTimeIdx]      = useState(0);
+  const [colorScale,    setColorScale]   = useState('RdBu');
+  const [playing,       setPlaying]      = useState(false);
+  const [speed,         setSpeed]        = useState(1);
+  const [clickInfo,     setClickInfo]    = useState(null);
+  const [backendOk,     setBackendOk]    = useState(true);
+  const [showCompare,   setCompare]      = useState(false);
+  const [showCities,    setCities]       = useState(false);
+  const [showChat,      setShowChat]     = useState(false);
+  const [healthInfo,    setHealthInfo]   = useState({});
+  const [region,        setRegion]       = useState('Global');
+  const [explanation,   setExplanation]  = useState('');
+  const [explainLoading,setExplainLoad]  = useState(false);
+  const [showExplain,   setShowExplain]  = useState(false);
+  const [pdfLoading,    setPdfLoading]   = useState(false);
+  const [demoLoading,   setDemoLoading]  = useState(false);
+
   const mapRef  = useRef(null);
   const playRef = useRef(null);
   const fileRef = useRef();
@@ -196,6 +239,19 @@ export default function DashboardPage() {
     const info = await uploadFile(file);
     if (info?.variables?.length) setSelVar(info.variables[0]);
   }, [uploadFile]);
+
+  // ── Load demo dataset via backend ─────────────────────────────────────────
+  const handleDemo = useCallback(async () => {
+    setDemoLoading(true);
+    try {
+      const info = await loadDemo();
+      if (info?.variables?.length) setSelVar(info.variables[0]);
+    } catch (e) {
+      console.error('Demo load error:', e);
+    } finally {
+      setDemoLoading(false);
+    }
+  }, [loadDemo]);
 
   const handlePointClick = useCallback(async ({ lat, lon }) => {
     const info = { lat, lon };
@@ -219,17 +275,14 @@ export default function DashboardPage() {
   };
 
   const handleExplainAI = async () => {
-    setShowExplain(true);
-    setExplainLoad(true);
+    setShowExplain(true); setExplainLoad(true);
     const curStep = timeSteps[timeIdx];
     const stats = heatData ? { mean: heatData.vmean, min: heatData.vmin, max: heatData.vmax, units: heatData.units } : null;
     const text = await explainGraph(selVar, curStep?.year, stats, region, 'heatmap');
-    setExplanation(text);
-    setExplainLoad(false);
+    setExplanation(text); setExplainLoad(false);
   };
 
-  // ── NEW: Chat → map sync handlers ─────────────────────────────────────────
-  // Called by AIChatPanel whenever a region/year/variable is detected in chat
+  // ── Chat → map sync ───────────────────────────────────────────────────────
   const handleChatRegionChange = useCallback((regionId) => {
     if (regionId) setRegion(regionId);
   }, []);
@@ -249,27 +302,20 @@ export default function DashboardPage() {
     setPdfLoading(true);
     try {
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-      const g  = [16, 190, 129];
+      const g = [16, 190, 129];
       const cs = timeSteps[timeIdx];
-
-      doc.setFillColor(0, 0, 0);
-      doc.rect(0, 0, 297, 210, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(24);
-      doc.setTextColor(...g);
-      doc.text('PyClimaExplorer', 15, 22);
-      doc.setFontSize(11);
-      doc.setTextColor(100, 100, 100);
-      doc.text('CESM1-LENS Climate Data Report', 15, 30);
-      doc.setFontSize(10);
-      doc.setTextColor(80, 80, 80);
       const varMeta = VAR_META[selVar] || {};
+
+      doc.setFillColor(0, 0, 0); doc.rect(0, 0, 297, 210, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(24); doc.setTextColor(...g);
+      doc.text('PyClimaExplorer', 15, 22);
+      doc.setFontSize(11); doc.setTextColor(100, 100, 100);
+      doc.text('CESM1-LENS Climate Data Report', 15, 30);
+      doc.setFontSize(10); doc.setTextColor(80, 80, 80);
       doc.text(`Variable: ${varMeta.label || selVar} (${varMeta.unit || ''})`, 15, 38);
       doc.text(`Year: ${cs ? cs.year : '—'}  Month: ${cs ? MONTHS[cs.month - 1] : '—'}  Region: ${region}`, 15, 44);
       doc.text(`Generated: ${new Date().toLocaleString()}`, 15, 50);
-      doc.setDrawColor(...g);
-      doc.setLineWidth(0.3);
-      doc.line(15, 54, 282, 54);
+      doc.setDrawColor(...g); doc.setLineWidth(0.3); doc.line(15, 54, 282, 54);
 
       if (heatData) {
         const stats = [
@@ -281,8 +327,7 @@ export default function DashboardPage() {
           ['Year',    cs?.year || '—'],
           ['Region',  region],
         ];
-        doc.setFontSize(9); doc.setTextColor(...g);
-        doc.text('STATISTICS', 15, 63);
+        doc.setFontSize(9); doc.setTextColor(...g); doc.text('STATISTICS', 15, 63);
         doc.setLineWidth(0.2); doc.line(15, 65, 282, 65);
         stats.forEach(([label, val], i) => {
           const x = 15, y = 72 + i * 10;
@@ -295,8 +340,7 @@ export default function DashboardPage() {
       }
 
       if (heatData?.grid) {
-        doc.addPage();
-        doc.setFillColor(0, 0, 0); doc.rect(0, 0, 297, 210, 'F');
+        doc.addPage(); doc.setFillColor(0, 0, 0); doc.rect(0, 0, 297, 210, 'F');
         doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(...g);
         doc.text('Spatial Data Summary', 15, 20);
         doc.setFontSize(9); doc.setTextColor(100, 100, 100);
@@ -309,8 +353,7 @@ export default function DashboardPage() {
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...g);
         headers.forEach((h, i) => doc.text(h, colX[i], 54));
         doc.line(15, 56, 282, 56);
-        const pts  = heatData.points || [];
-        const step = Math.max(1, Math.floor(pts.length / 40));
+        const pts = heatData.points || [], step = Math.max(1, Math.floor(pts.length / 40));
         let row = 0;
         for (let i = 0; i < pts.length && row < 40; i += step, row++) {
           const p = pts[i], y = 63 + row * 7;
@@ -322,8 +365,7 @@ export default function DashboardPage() {
       }
 
       if (explanation) {
-        doc.addPage();
-        doc.setFillColor(0, 0, 0); doc.rect(0, 0, 297, 210, 'F');
+        doc.addPage(); doc.setFillColor(0, 0, 0); doc.rect(0, 0, 297, 210, 'F');
         doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(...g);
         doc.text('AI Climate Analysis', 15, 20);
         doc.setFontSize(9); doc.setTextColor(100, 100, 100);
@@ -352,10 +394,8 @@ export default function DashboardPage() {
   const filteredData   = heatData ? { ...heatData, points: filteredPoints, grid: filteredGrid } : null;
 
   const trendData = timeSteps.map((t, i) => ({
-    year:  t.year,
-    value: heatData
-      ? parseFloat((heatData.vmean + (i - timeIdx) * 0.015 + Math.sin(i * 0.3) * 0.04).toFixed(3))
-      : null,
+    year: t.year,
+    value: heatData ? parseFloat((heatData.vmean + (i - timeIdx) * 0.015 + Math.sin(i * 0.3) * 0.04).toFixed(3)) : null,
   })).filter(d => d.value !== null);
 
   const currentContext = {
@@ -396,8 +436,10 @@ export default function DashboardPage() {
         </button>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {loading && <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b' }} />}
-          <span style={{ fontSize: '11px', color: '#444', fontFamily: 'var(--font-mono)' }}>{fileInfo ? `📂 ${fileInfo.filename}` : 'NO FILE'}</span>
+          {(loading || demoLoading) && <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b' }} />}
+          <span style={{ fontSize: '11px', color: '#444', fontFamily: 'var(--font-mono)' }}>
+            {fileInfo ? `📂 ${fileInfo.filename}` : 'NO FILE'}
+          </span>
           {hasFile && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#10BE81', boxShadow: '0 0 5px #10BE81' }} />}
           <button className="btn-aurora" style={{ fontSize: '10px', padding: '4px 10px' }} onClick={() => fileRef.current.click()}>
             {hasFile ? 'Change File' : 'Upload'}
@@ -418,7 +460,16 @@ export default function DashboardPage() {
         </div>
 
         <AnimatePresence>
-          {!hasFile && <UploadOverlay onFile={handleFile} loading={loading} error={error} backendOk={backendOk} />}
+          {!hasFile && (
+            <UploadOverlay
+              onFile={handleFile}
+              onDemo={handleDemo}
+              loading={loading}
+              demoLoading={demoLoading}
+              error={error}
+              backendOk={backendOk}
+            />
+          )}
         </AnimatePresence>
 
         <PanelGroup direction="horizontal" style={{ height: '100%', position: 'relative', zIndex: 10 }}>
@@ -467,7 +518,7 @@ export default function DashboardPage() {
                     <AreaChart data={trendData} margin={{ top: 10, right: 0, left: -25, bottom: 0 }}>
                       <defs>
                         <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%"  stopColor="var(--aurora-cyan)" stopOpacity={0.3} />
+                          <stop offset="5%" stopColor="var(--aurora-cyan)" stopOpacity={0.3} />
                           <stop offset="95%" stopColor="var(--aurora-cyan)" stopOpacity={0} />
                         </linearGradient>
                       </defs>
@@ -595,7 +646,7 @@ export default function DashboardPage() {
                     <AreaChart data={trendData} margin={{ top: 10, right: 18, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="tsG" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%"  stopColor="var(--aurora-cyan)" stopOpacity={0.2} />
+                          <stop offset="5%" stopColor="var(--aurora-cyan)" stopOpacity={0.2} />
                           <stop offset="95%" stopColor="var(--aurora-cyan)" stopOpacity={0} />
                         </linearGradient>
                       </defs>

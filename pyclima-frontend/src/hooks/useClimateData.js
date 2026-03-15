@@ -13,6 +13,20 @@ export function useClimateData() {
   const [chatLoading,  setChatLoading]  = useState(false);
   const abortRef = useRef(null);
 
+  const loadDemo = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const res  = await fetch(`${API}/load-demo`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Demo load failed');
+      setFileInfo(data);
+      setVariables(data.variables?.length ? data.variables : ['temperature','precipitation','wind']);
+      setTimeSteps(data.time_steps || []);
+      return data;
+    } catch (e) { setError(e.message); return null; }
+    finally { setLoading(false); }
+  }, []);
+
   const uploadFile = useCallback(async (file) => {
     setLoading(true); setError(null);
     try {
@@ -198,7 +212,7 @@ export function useClimateData() {
   return {
     fileInfo, variables, timeSteps, heatData, loading, error,
     chatMessages, chatLoading,
-    uploadFile, fetchData, fetchCompare, fetchCityCompare,
+    uploadFile, loadDemo, fetchData, fetchCompare, fetchCityCompare,
     fetchTimeseries, fetchStats, fetchPoint,
     checkHealth, fetchCesmTimesteps,
     sendChat, clearChat, explainGraph,

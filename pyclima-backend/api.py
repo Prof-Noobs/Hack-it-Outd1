@@ -4,12 +4,13 @@ PyClimaExplorer v2 — Enhanced FastAPI Backend
 - Groq-powered AI chat + Explain AI
 - Working comparison endpoint
 - City comparison time-series endpoint
+- Demo dataset loader
 Run: uvicorn api:app --reload --port 8000
 """
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Union
 import xarray as xr
 import numpy as np
 import tempfile, os, json
@@ -39,7 +40,6 @@ _store    = {}
 _cesm_ds  = None
 CESM_PATH = "dataset/CESM1-LENS_011.cvdp_data.1920-2018.nc"
 
-# CESM variable mapping: friendly name → actual NetCDF variable candidates
 VARIABLE_MAP = {
     "temperature": [
         "tas_global_avg_mon", "tas_trends_ann", "tas_trends_mon",
@@ -106,23 +106,19 @@ def _active_ds():
 
 
 def _resolve_var(ds, friendly: str) -> Optional[str]:
-    """Find best matching NetCDF variable for a friendly name."""
     if ds is None:
         return None
     lat_key = get_coord(ds, ["lat", "latitude", "y"])
     lon_key = get_coord(ds, ["lon", "longitude", "x"])
     candidates = VARIABLE_MAP.get(friendly, [friendly])
-    # Exact match with spatial dims
     for c in candidates:
         if c in ds.data_vars:
             da = ds[c]
             if lat_key in da.dims or lon_key in da.dims:
                 return c
-    # Exact match any dims
     for c in candidates:
         if c in ds.data_vars:
             return c
-    # Fuzzy match
     kw = friendly.lower()
     for v in ds.data_vars:
         if kw in v.lower():
@@ -179,6 +175,28 @@ def _make_heatmap(ds, var_name, lat_key, lon_key, time_key=None, time_index=0, r
             "units": str(ds[var_name].attrs.get("units", ""))}
 
 
+def _parse_time_steps(ds, time_key):
+    """Parse time steps from a dataset into a list of {index, year, month} dicts."""
+    time_steps = []
+    if not time_key:
+        return time_steps
+    raw_times = ds[time_key].values
+    try:
+        first = float(raw_times[0])
+        if 1500 <= first <= 2200:
+            time_steps = [{"index": int(i), "year": int(float(v)), "month": 1}
+                          for i, v in enumerate(raw_times)]
+        else:
+            import pandas as pd
+            times = pd.to_datetime(raw_times)
+            time_steps = [{"index": int(i), "year": int(t.year), "month": int(t.month)}
+                          for i, t in enumerate(times)]
+    except Exception:
+        time_steps = [{"index": int(i), "year": 1920 + i, "month": 1}
+                      for i in range(len(raw_times))]
+    return time_steps
+
+
 # ── Available variables ────────────────────────────────────────────────────────
 
 @app.get("/available-variables")
@@ -188,11 +206,11 @@ def available_variables():
     for friendly in ["temperature", "precipitation", "wind"]:
         actual = _resolve_var(ds, friendly) if ds else None
         result.append({
-            "id":        friendly,
-            "label":     VARIABLE_LABELS[friendly]["label"],
-            "unit":      VARIABLE_LABELS[friendly]["unit"],
-            "icon":      VARIABLE_LABELS[friendly]["icon"],
-            "available": actual is not None,
+            "id":         friendly,
+            "label":      VARIABLE_LABELS[friendly]["label"],
+            "unit":       VARIABLE_LABELS[friendly]["unit"],
+            "icon":       VARIABLE_LABELS[friendly]["icon"],
+            "available":  actual is not None,
             "actual_var": actual,
         })
     return result
@@ -233,33 +251,112 @@ async def upload(file: UploadFile = File(...)):
     if not variables:
         raise HTTPException(400, "No spatial variables found.")
 
-    time_steps = []
-    if time:
-        raw_times = ds[time].values
-        try:
-            # First try: values look like plain years (1920.0, 1921.0 ...)
-            first = float(raw_times[0])
-            if 1500 <= first <= 2200:
-                # Plain year numbers — use directly
-                time_steps = [{"index": int(i), "year": int(float(v)), "month": 1}
-                              for i, v in enumerate(raw_times)]
-            else:
-                # Try pandas datetime parsing
-                import pandas as pd
-                times = pd.to_datetime(raw_times)
-                time_steps = [{"index": int(i), "year": int(t.year), "month": int(t.month)}
-                              for i, t in enumerate(times)]
-        except Exception:
-            # Fallback: assign sequential years from 1920
-            time_steps = [{"index": int(i), "year": 1920 + i, "month": 1}
-                          for i in range(len(raw_times))]
+    time_steps = _parse_time_steps(ds, time)
 
     _store.update({"ds": ds, "lat": lat, "lon": lon, "time": time, "filename": file.filename})
     return {
-        "variables": variables, "time_steps": time_steps,
-        "lat_range": [to_float(float(ds[lat].min())), to_float(float(ds[lat].max()))],
-        "lon_range": [to_float(float(ds[lon].min())), to_float(float(ds[lon].max()))],
-        "filename":  file.filename,
+        "variables":  variables,
+        "time_steps": time_steps,
+        "lat_range":  [to_float(float(ds[lat].min())), to_float(float(ds[lat].max()))],
+        "lon_range":  [to_float(float(ds[lon].min())), to_float(float(ds[lon].max()))],
+        "filename":   file.filename,
+    }
+
+
+# ── Demo dataset loader ────────────────────────────────────────────────────────
+
+@app.get("/load-demo")
+async def load_demo():
+    import httpx
+
+    FILE_ID  = "1fiaT0wUEIyr7CUScxCPCnFXH3NlVXC4n"
+    BASE_URL = "https://drive.google.com/uc?export=download"
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=180.0) as client:
+            # Step 1: initial request — may return confirmation page for large files
+            r1 = await client.get(f"{BASE_URL}&id={FILE_ID}")
+
+            content = r1.content
+
+            # Step 2: if Google returns an HTML confirmation page, extract confirm token
+            if b"<!DOCTYPE html" in content[:500] or b"<html" in content[:500]:
+                # Try to extract the confirm token from the HTML
+                import re
+                token_match = re.search(rb'confirm=([0-9A-Za-z_\-]+)', content)
+                if token_match:
+                    token = token_match.group(1).decode()
+                    r2 = await client.get(
+                        f"{BASE_URL}&id={FILE_ID}&confirm={token}",
+                        headers={"Cookie": "; ".join(
+                            [f"{k}={v}" for k, v in r1.cookies.items()]
+                        )}
+                    )
+                    content = r2.content
+                else:
+                    # Try the newer Google Drive download URL format
+                    r2 = await client.get(
+                        f"https://drive.usercontent.google.com/download?id={FILE_ID}&export=download&confirm=t"
+                    )
+                    content = r2.content
+
+    except httpx.TimeoutException:
+        raise HTTPException(500, "Demo file download timed out. Please try again.")
+    except Exception as e:
+        raise HTTPException(500, f"Failed to download demo file: {e}")
+
+    # Verify we got a real NetCDF file (starts with CDF or HDF magic bytes)
+    if len(content) < 100:
+        raise HTTPException(500, "Downloaded file is too small — Google Drive may have returned an error page.")
+
+    is_netcdf = content[:3] == b'CDF' or content[:4] == b'\x89HDF'
+    if not is_netcdf:
+        raise HTTPException(500, "Downloaded file does not appear to be a valid NetCDF file. The Google Drive link may require manual confirmation.")
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".nc")
+    try:
+        tmp.write(content)
+        tmp.close()
+        # Try engines in order of preference
+        ds = None
+        for engine in ['netcdf4', 'h5netcdf', 'scipy']:
+            try:
+                ds = xr.open_dataset(tmp.name, engine=engine)
+                break
+            except Exception:
+                continue
+        if ds is None:
+            raise HTTPException(500, "Could not open NetCDF file with any available engine.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to read NetCDF: {e}")
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except:
+            pass
+
+    lat  = get_coord(ds, ["lat", "latitude", "y", "nav_lat"])
+    lon  = get_coord(ds, ["lon", "longitude", "x", "nav_lon"])
+    time = get_coord(ds, ["time", "t", "date"])
+
+    if not lat or not lon:
+        raise HTTPException(400, "Demo file has no lat/lon coordinates.")
+
+    friendly_vars = [f for f in ["temperature", "precipitation", "wind"] if _resolve_var(ds, f)]
+    variables = friendly_vars if friendly_vars else list(ds.data_vars)
+
+    time_steps = _parse_time_steps(ds, time)
+
+    _store.update({"ds": ds, "lat": lat, "lon": lon, "time": time, "filename": "demo_dataset.nc"})
+
+    return {
+        "variables":  variables,
+        "time_steps": time_steps,
+        "lat_range":  [to_float(float(ds[lat].min())), to_float(float(ds[lat].max()))],
+        "lon_range":  [to_float(float(ds[lon].min())), to_float(float(ds[lon].max()))],
+        "filename":   "demo_dataset.nc",
     }
 
 
@@ -272,7 +369,6 @@ def cesm_timesteps():
     time_key = get_coord(_cesm_ds, ["time", "t"])
     if time_key:
         n = int(_cesm_ds.dims.get(time_key, 99))
-        # CESM 1920-2018 monthly = 1188 steps; if less, map to years
         years = list(range(1920, 1920 + min(n, 99)))
         return {"years": years,
                 "time_steps": [{"index": i, "year": y, "month": 1} for i, y in enumerate(years)]}
@@ -446,8 +542,8 @@ def dataset_info():
         if actual:
             available.append({"id": friendly, **VARIABLE_LABELS[friendly], "actual_var": actual})
     return {
-        "source": "uploaded" if "ds" in _store else "cesm_default",
-        "filename": _store.get("filename", "CESM1-LENS default"),
+        "source":       "uploaded" if "ds" in _store else "cesm_default",
+        "filename":     _store.get("filename", "CESM1-LENS default"),
         "available_vars": available,
         "all_variables":  list(ds.data_vars)[:20],
         "dimensions":     {k: int(v) for k, v in ds.dims.items()},
@@ -466,15 +562,26 @@ You help users understand CESM1-LENS climate model data (1920-2018).
 
 The platform shows three variables:
 - Temperature (degC): surface air temperature trends
-- Precipitation (mm/day): rainfall patterns  
+- Precipitation (mm/day): rainfall patterns
 - Wind Speed (m/s): surface wind fields
 
-Be concise, scientific but accessible. Reference:
-- Notable climate events (1997-98 El Nino, volcanic eruptions, PDO shifts)
-- Regional patterns (monsoons, trade winds, ITCZ, polar amplification)
-- Long-term trends (anthropogenic warming signal)
+IMPORTANT — DASHBOARD SYNC:
+Whenever the user mentions a geographic region, country, or year, you MUST include
+a JSON context block at the END of your response in exactly this format:
+{"variable": "<temperature|precipitation|wind>", "year": <YYYY or null>, "region": "<RegionId>"}
 
-Keep answers under 150 words unless asked for detail.
+Valid region IDs: Global, India, China, Japan, USA, Europe, Africa, Australia,
+  NorthAmerica, SouthAmerica, Asia, MiddleEast, Russia, Arctic, Antarctica,
+  SouthAsia, SoutheastAsia, NorthAfrica, SubSaharanAfrica, Amazon, Pacific, Atlantic
+
+Examples:
+  User: "Show me India temperature"
+  → end response with: {"variable": "temperature", "year": null, "region": "India"}
+
+  User: "What was precipitation in Europe in 1990?"
+  → end response with: {"variable": "precipitation", "year": 1990, "region": "Europe"}
+
+Keep scientific explanations under 150 words before the JSON block.
 Always be helpful and mention what to look for on the map.
 """
 
@@ -498,16 +605,11 @@ async def chat_endpoint(request: ChatRequest):
 
 # ── Explain AI (Groq) ─────────────────────────────────────────────────────────
 
-# ── Explain AI (Groq) ─────────────────────────────────────────────────────────
-# Drop-in replacement for the /explain endpoint in api.py
-# Paste this over the existing ExplainRequest class and /explain route.
-
 class ExplainRequest(BaseModel):
-    variable: str
-    year: Optional[str] = None      # Changed from int → str so "1920 vs 2018"
-                                     # or null both work without a TypeError
-    stats: Optional[dict] = None
-    region: Optional[str] = "Global"
+    variable:   str
+    year:       Union[int, str, None] = None
+    stats:      Optional[dict] = None
+    region:     Optional[str] = "Global"
     chart_type: Optional[str] = "heatmap"
 
 EXPLAIN_SYSTEM = """You are a climate scientist explaining visualizations to students and researchers.
@@ -524,26 +626,24 @@ async def explain_endpoint(request: ExplainRequest):
     if groq_client is None:
         return {"explanation": "Explain AI requires GROQ_API_KEY in your .env file.", "error": "no_key"}
 
-    # Build stats string safely — guard against None/missing keys
+    year_str = f", {request.year}" if request.year is not None else ""
+
     stats_str = ""
     if request.stats and isinstance(request.stats, dict):
         s = request.stats
-        mean_val = s.get('mean')
-        min_val  = s.get('min')
-        max_val  = s.get('max')
-        units    = s.get('units', '')
         parts = []
-        if mean_val is not None:
-            parts.append(f"mean={round(float(mean_val), 3)}")
-        if min_val is not None:
-            parts.append(f"min={round(float(min_val), 3)}")
-        if max_val is not None:
-            parts.append(f"max={round(float(max_val), 3)}")
-        if parts:
-            stats_str = f" Current stats: {', '.join(parts)}{' ' + str(units) if units else ''}."
-
-    # year is now a string — can be "1920", "1920 vs 2018", or None
-    year_str = f", {request.year}" if request.year else ""
+        try:
+            if s.get('mean') is not None:
+                parts.append(f"mean={round(float(s['mean']), 3)}")
+            if s.get('min') is not None:
+                parts.append(f"min={round(float(s['min']), 3)}")
+            if s.get('max') is not None:
+                parts.append(f"max={round(float(s['max']), 3)}")
+            units = str(s.get('units', ''))
+            if parts:
+                stats_str = f" Current stats: {', '.join(parts)}{(' ' + units) if units else ''}."
+        except (TypeError, ValueError):
+            pass
 
     prompt = (
         f"Explain the {request.chart_type} of {request.variable} for the "
@@ -590,7 +690,7 @@ async def city_compare(request: CityCompareRequest):
     if not time_key or time_key not in da.dims:
         raise HTTPException(400, "No time dimension.")
 
-    n_time = int(da.dims[time_key])
+    n_time   = int(da.dims[time_key])
     raw_time = ds[time_key].values if time_key in ds.coords else list(range(n_time))
     years = []
     try:
@@ -625,9 +725,9 @@ async def city_compare(request: CityCompareRequest):
 
     return {
         "variable": request.variable, "series": combined,
-        "stats_a": stats(series_a), "stats_b": stats(series_b),
-        "city_a": request.city_a, "city_b": request.city_b,
-        "units": str(ds[actual_var].attrs.get("units", "")),
+        "stats_a":  stats(series_a),  "stats_b": stats(series_b),
+        "city_a":   request.city_a,   "city_b":  request.city_b,
+        "units":    str(ds[actual_var].attrs.get("units", "")),
     }
 
 
@@ -639,7 +739,7 @@ def health():
     available_vars = [f for f in ["temperature", "precipitation", "wind"]
                       if ds and _resolve_var(ds, f)]
     return {
-        "status": "ok",
+        "status":          "ok",
         "dataset_loaded":  "ds" in _store,
         "cesm_loaded":     _cesm_ds is not None,
         "ai_chat":         groq_client is not None,
