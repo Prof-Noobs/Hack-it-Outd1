@@ -1,6 +1,7 @@
 # PyClimaExplorer v2 🌍
 
 DEMO DATA BASE LINK = https://drive.google.com/uc?export=download&id=1fiaT0wUEIyr7CUScxCPCnFXH3NlVXC4n
+DEMO VIDEO LINK = https://youtu.be/awcHo542ba8
 
 
 
