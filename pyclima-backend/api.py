@@ -269,8 +269,8 @@ async def upload(file: UploadFile = File(...)):
 async def load_demo():
     import httpx
 
-    FILE_ID  = "1fiaT0wUEIyr7CUScxCPCnFXH3NlVXC4n"
-    BASE_URL = "https://drive.google.com/uc?export=download"
+        DEMO_URL = "https://github.com/Prof-Noobs/Hack-it-Outd1/releases/download/v1.0/pyclima_demo_1920_2018.nc"
+
 
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=180.0) as client:
