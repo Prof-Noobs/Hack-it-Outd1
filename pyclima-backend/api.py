@@ -4,7 +4,7 @@ PyClimaExplorer v2 — Enhanced FastAPI Backend
 - Groq-powered AI chat + Explain AI
 - Working comparison endpoint
 - City comparison time-series endpoint
-- Demo dataset loader
+- Demo dataset loader via GitHub Releases
 Run: uvicorn api:app --reload --port 8000
 """
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
@@ -36,8 +36,8 @@ app.add_middleware(
 )
 
 # ── Dataset stores ─────────────────────────────────────────────────────────────
-_store    = {}
-_cesm_ds  = None
+_store   = {}
+_cesm_ds = None
 CESM_PATH = "dataset/CESM1-LENS_011.cvdp_data.1920-2018.nc"
 
 VARIABLE_MAP = {
@@ -176,7 +176,6 @@ def _make_heatmap(ds, var_name, lat_key, lon_key, time_key=None, time_index=0, r
 
 
 def _parse_time_steps(ds, time_key):
-    """Parse time steps from a dataset into a list of {index, year, month} dicts."""
     time_steps = []
     if not time_key:
         return time_steps
@@ -269,55 +268,29 @@ async def upload(file: UploadFile = File(...)):
 async def load_demo():
     import httpx
 
-        DEMO_URL = "https://github.com/Prof-Noobs/Hack-it-Outd1/releases/download/v1.0/pyclima_demo_1920_2018.nc"
-
+    DEMO_URL = "https://github.com/Prof-Noobs/Hack-it-Outd1/releases/download/v1.0/pyclima_demo_1920_2018.nc"
 
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=180.0) as client:
-            # Step 1: initial request — may return confirmation page for large files
-            r1 = await client.get(f"{BASE_URL}&id={FILE_ID}")
-
-            content = r1.content
-
-            # Step 2: if Google returns an HTML confirmation page, extract confirm token
-            if b"<!DOCTYPE html" in content[:500] or b"<html" in content[:500]:
-                # Try to extract the confirm token from the HTML
-                import re
-                token_match = re.search(rb'confirm=([0-9A-Za-z_\-]+)', content)
-                if token_match:
-                    token = token_match.group(1).decode()
-                    r2 = await client.get(
-                        f"{BASE_URL}&id={FILE_ID}&confirm={token}",
-                        headers={"Cookie": "; ".join(
-                            [f"{k}={v}" for k, v in r1.cookies.items()]
-                        )}
-                    )
-                    content = r2.content
-                else:
-                    # Try the newer Google Drive download URL format
-                    r2 = await client.get(
-                        f"https://drive.usercontent.google.com/download?id={FILE_ID}&export=download&confirm=t"
-                    )
-                    content = r2.content
-
+            response = await client.get(DEMO_URL)
+        if response.status_code != 200:
+            raise HTTPException(500, f"Download failed with status {response.status_code}")
     except httpx.TimeoutException:
-        raise HTTPException(500, "Demo file download timed out. Please try again.")
+        raise HTTPException(500, "Download timed out. Please try again.")
     except Exception as e:
         raise HTTPException(500, f"Failed to download demo file: {e}")
 
-    # Verify we got a real NetCDF file (starts with CDF or HDF magic bytes)
-    if len(content) < 100:
-        raise HTTPException(500, "Downloaded file is too small — Google Drive may have returned an error page.")
+    content = response.content
 
+    # Verify it is a real NetCDF file
     is_netcdf = content[:3] == b'CDF' or content[:4] == b'\x89HDF'
     if not is_netcdf:
-        raise HTTPException(500, "Downloaded file does not appear to be a valid NetCDF file. The Google Drive link may require manual confirmation.")
+        raise HTTPException(500, "Downloaded file is not a valid NetCDF file.")
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".nc")
     try:
         tmp.write(content)
         tmp.close()
-        # Try engines in order of preference
         ds = None
         for engine in ['netcdf4', 'h5netcdf', 'scipy']:
             try:
@@ -346,7 +319,6 @@ async def load_demo():
 
     friendly_vars = [f for f in ["temperature", "precipitation", "wind"] if _resolve_var(ds, f)]
     variables = friendly_vars if friendly_vars else list(ds.data_vars)
-
     time_steps = _parse_time_steps(ds, time)
 
     _store.update({"ds": ds, "lat": lat, "lon": lon, "time": time, "filename": "demo_dataset.nc"})
@@ -542,8 +514,8 @@ def dataset_info():
         if actual:
             available.append({"id": friendly, **VARIABLE_LABELS[friendly], "actual_var": actual})
     return {
-        "source":       "uploaded" if "ds" in _store else "cesm_default",
-        "filename":     _store.get("filename", "CESM1-LENS default"),
+        "source":         "uploaded" if "ds" in _store else "cesm_default",
+        "filename":       _store.get("filename", "CESM1-LENS default"),
         "available_vars": available,
         "all_variables":  list(ds.data_vars)[:20],
         "dimensions":     {k: int(v) for k, v in ds.dims.items()},
@@ -576,10 +548,10 @@ Valid region IDs: Global, India, China, Japan, USA, Europe, Africa, Australia,
 
 Examples:
   User: "Show me India temperature"
-  → end response with: {"variable": "temperature", "year": null, "region": "India"}
+  end response with: {"variable": "temperature", "year": null, "region": "India"}
 
   User: "What was precipitation in Europe in 1990?"
-  → end response with: {"variable": "precipitation", "year": 1990, "region": "Europe"}
+  end response with: {"variable": "precipitation", "year": 1990, "region": "Europe"}
 
 Keep scientific explanations under 150 words before the JSON block.
 Always be helpful and mention what to look for on the map.
