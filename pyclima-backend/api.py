@@ -498,9 +498,14 @@ async def chat_endpoint(request: ChatRequest):
 
 # ── Explain AI (Groq) ─────────────────────────────────────────────────────────
 
+# ── Explain AI (Groq) ─────────────────────────────────────────────────────────
+# Drop-in replacement for the /explain endpoint in api.py
+# Paste this over the existing ExplainRequest class and /explain route.
+
 class ExplainRequest(BaseModel):
     variable: str
-    year: Optional[int] = None
+    year: Optional[str] = None      # Changed from int → str so "1920 vs 2018"
+                                     # or null both work without a TypeError
     stats: Optional[dict] = None
     region: Optional[str] = "Global"
     chart_type: Optional[str] = "heatmap"
@@ -519,24 +524,46 @@ async def explain_endpoint(request: ExplainRequest):
     if groq_client is None:
         return {"explanation": "Explain AI requires GROQ_API_KEY in your .env file.", "error": "no_key"}
 
+    # Build stats string safely — guard against None/missing keys
     stats_str = ""
-    if request.stats:
+    if request.stats and isinstance(request.stats, dict):
         s = request.stats
-        stats_str = f" Current stats: mean={s.get('mean','?')}, min={s.get('min','?')}, max={s.get('max','?')} {s.get('units','')}."
+        mean_val = s.get('mean')
+        min_val  = s.get('min')
+        max_val  = s.get('max')
+        units    = s.get('units', '')
+        parts = []
+        if mean_val is not None:
+            parts.append(f"mean={round(float(mean_val), 3)}")
+        if min_val is not None:
+            parts.append(f"min={round(float(min_val), 3)}")
+        if max_val is not None:
+            parts.append(f"max={round(float(max_val), 3)}")
+        if parts:
+            stats_str = f" Current stats: {', '.join(parts)}{' ' + str(units) if units else ''}."
 
-    prompt = (f"Explain the {request.chart_type} of {request.variable} for the "
-              f"{request.region} region{f', year {request.year}' if request.year else ''}.{stats_str} "
-              f"Data is from CESM1-LENS climate model (1920-2018).")
+    # year is now a string — can be "1920", "1920 vs 2018", or None
+    year_str = f", {request.year}" if request.year else ""
+
+    prompt = (
+        f"Explain the {request.chart_type} of {request.variable} for the "
+        f"{request.region} region{year_str}.{stats_str} "
+        f"Data is from CESM1-LENS climate model (1920-2018)."
+    )
+
     try:
         resp = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": EXPLAIN_SYSTEM},
-                      {"role": "user", "content": prompt}],
-            max_tokens=350, temperature=0.6
+            messages=[
+                {"role": "system", "content": EXPLAIN_SYSTEM},
+                {"role": "user",   "content": prompt},
+            ],
+            max_tokens=350,
+            temperature=0.6,
         )
         return {"explanation": resp.choices[0].message.content.strip(), "error": None}
     except Exception as e:
-        return {"explanation": f"Error: {e}", "error": str(e)}
+        return {"explanation": f"Error generating explanation: {e}", "error": str(e)}
 
 
 # ── City comparison ────────────────────────────────────────────────────────────

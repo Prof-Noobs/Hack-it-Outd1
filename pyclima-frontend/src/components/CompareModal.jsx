@@ -36,17 +36,18 @@ export default function CompareModal({
   onClose, timeSteps, variables: availableVars,
   selVar, colorScale, fetchCompare, explainGraph
 }) {
-  const [variable,  setVariable]  = useState(selVar || 'temperature');
-  const [idxA,      setIdxA]      = useState(0);
-  const [idxB,      setIdxB]      = useState(Math.max(0, timeSteps.length - 1));
-  const [dataA,     setDataA]     = useState(null);
-  const [dataB,     setDataB]     = useState(null);
-  const [diffData,  setDiffData]  = useState(null);
-  const [loading,   setLoading]   = useState(false);
-  const [viewMode,  setViewMode]  = useState('2d');
-  const [chartMode, setChartMode] = useState('map');  // map | bar | line
-  const [explaining,setExplaining]= useState(false);
-  const [explanation,setExplanation]=useState('');
+  const [variable,   setVariable]   = useState(selVar || 'temperature');
+  const [idxA,       setIdxA]       = useState(0);
+  const [idxB,       setIdxB]       = useState(Math.max(0, timeSteps.length - 1));
+  const [dataA,      setDataA]      = useState(null);
+  const [dataB,      setDataB]      = useState(null);
+  const [diffData,   setDiffData]   = useState(null);
+  const [loading,    setLoading]    = useState(false);
+  const [viewMode,   setViewMode]   = useState('2d');
+  const [chartMode,  setChartMode]  = useState('map');
+  const [explaining, setExplaining] = useState(false);
+  const [explanation,setExplanation]= useState('');
+  const [explainErr, setExplainErr] = useState('');
 
   const load = useCallback(async () => {
     if (timeSteps.length === 0) return;
@@ -65,26 +66,60 @@ export default function CompareModal({
 
   useEffect(() => { load(); }, [load]);
 
+  // ── FIX: call explainGraph with correct arg types matching ExplainRequest ──
+  // Backend expects: { variable: str, year: int|null, stats: dict|null,
+  //                    region: str, chart_type: str }
+  // Old (broken): explainGraph(variable, `${yearA} vs ${yearB}`, stats, region, type)
+  //   → sent year as a string "1920 vs 2018" which Python tried to cast to int → TypeError
+  // New (fixed): pass year as null (comparison spans two years, not one),
+  //   and embed the year context inside the region string so the prompt is still informative.
   const handleExplain = async () => {
+    if (!dataA) return;
     setExplaining(true);
-    const yearA = timeSteps[idxA]?.year;
-    const yearB = timeSteps[idxB]?.year;
-    const stats = dataA ? { mean: dataA.vmean, min: dataA.vmin, max: dataA.vmax, units: dataA.units } : null;
-    const text  = await explainGraph(variable,
-      `${yearA} vs ${yearB}`, stats, 'Global', 'comparison');
-    setExplanation(text);
-    setExplaining(false);
+    setExplainErr('');
+    setExplanation('');
+
+    const yearA = timeSteps[idxA]?.year ?? null;
+    const yearB = timeSteps[idxB]?.year ?? null;
+
+    // Build stats dict from dataA — matches backend Optional[dict] shape
+    const stats = dataA ? {
+      mean:  dataA.vmean,
+      min:   dataA.vmin,
+      max:   dataA.vmax,
+      units: dataA.units || '',
+    } : null;
+
+    // Region string carries the year comparison context for the AI prompt
+    const region = `Global (${yearA} vs ${yearB})`;
+
+    try {
+      // explainGraph wrapper in your hook should POST to /explain with:
+      // { variable, year: null, stats, region, chart_type }
+      // We pass null for year because it's a comparison, not a single year.
+      const text = await explainGraph(
+        variable,   // string  → variable
+        null,       // null    → year (was broken string "1920 vs 2018")
+        stats,      // dict    → stats
+        region,     // string  → region (carries year info for the prompt)
+        'comparison' // string → chart_type
+      );
+      setExplanation(text || 'No explanation returned.');
+    } catch (e) {
+      setExplainErr(`Error: ${e?.message || e}`);
+    } finally {
+      setExplaining(false);
+    }
   };
 
-  const years  = timeSteps.map(t => t.year);
-  const yearA  = years[idxA] || '—';
-  const yearB  = years[idxB] || '—';
+  const years = timeSteps.map(t => t.year);
+  const yearA = years[idxA] || '—';
+  const yearB = years[idxB] || '—';
 
-  // Build bar chart data from stats
   const barData = dataA && dataB ? [
-    { name: 'Mean',  A: parseFloat(dataA.vmean?.toFixed(3)), B: parseFloat(dataB.vmean?.toFixed(3)) },
-    { name: 'Max',   A: parseFloat(dataA.vmax?.toFixed(3)),  B: parseFloat(dataB.vmax?.toFixed(3)) },
-    { name: 'Min',   A: parseFloat(dataA.vmin?.toFixed(3)),  B: parseFloat(dataB.vmin?.toFixed(3)) },
+    { name: 'Mean', A: parseFloat(dataA.vmean?.toFixed(3)), B: parseFloat(dataB.vmean?.toFixed(3)) },
+    { name: 'Max',  A: parseFloat(dataA.vmax?.toFixed(3)),  B: parseFloat(dataB.vmax?.toFixed(3)) },
+    { name: 'Min',  A: parseFloat(dataA.vmin?.toFixed(3)),  B: parseFloat(dataB.vmin?.toFixed(3)) },
   ] : [];
 
   return (
@@ -93,7 +128,9 @@ export default function CompareModal({
       onClick={e => e.target === e.currentTarget && onClose()}>
       <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }}
         className="glass-panel"
-        style={{ width: '94vw', maxWidth: '1100px', maxHeight: '92vh', overflow: 'auto', padding: '32px', borderRadius: '24px', border: '1px solid var(--border-subtle)', background: 'rgba(11,11,19,0.95)', boxShadow: '0 0 100px rgba(0,0,0,0.8)' }}>
+        style={{ width: '94vw', maxWidth: '1100px', maxHeight: '92vh', overflow: 'auto', padding: '32px',
+                 borderRadius: '24px', border: '1px solid var(--border-subtle)',
+                 background: 'rgba(11,11,19,0.95)', boxShadow: '0 0 100px rgba(0,0,0,0.8)' }}>
 
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
@@ -114,9 +151,9 @@ export default function CompareModal({
                 <button key={m} onClick={() => setChartMode(m)} style={{
                   padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px',
                   border: 'none',
-                  background: chartMode===m?'var(--aurora-cyan-dim)':'transparent',
-                  color: chartMode===m?'var(--aurora-cyan)':'var(--text-muted)', fontFamily: 'var(--font-mono)',
-                  transition: 'all 0.2s'
+                  background: chartMode===m ? 'var(--aurora-cyan-dim)' : 'transparent',
+                  color: chartMode===m ? 'var(--aurora-cyan)' : 'var(--text-muted)',
+                  fontFamily: 'var(--font-mono)', transition: 'all 0.2s'
                 }}>{m.toUpperCase()}</button>
               ))}
             </div>
@@ -126,9 +163,9 @@ export default function CompareModal({
                   <button key={v} onClick={() => setViewMode(v)} style={{
                     padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px',
                     border: 'none',
-                    background: viewMode===v?'var(--aurora-magenta-dim)':'transparent',
-                    color: viewMode===v?'var(--aurora-magenta)':'var(--text-muted)', fontFamily: 'var(--font-mono)',
-                    transition: 'all 0.2s'
+                    background: viewMode===v ? 'var(--aurora-magenta-dim)' : 'transparent',
+                    color: viewMode===v ? 'var(--aurora-magenta)' : 'var(--text-muted)',
+                    fontFamily: 'var(--font-mono)', transition: 'all 0.2s'
                   }}>{v.toUpperCase()}</button>
                 ))}
               </div>
@@ -142,7 +179,7 @@ export default function CompareModal({
           {VARIABLES.map(v => {
             const active = variable === v.id;
             return (
-              <button key={v.id} onClick={() => setVariable(v.id)} style={{
+              <button key={v.id} onClick={() => { setVariable(v.id); setExplanation(''); setExplainErr(''); }} style={{
                 flex: 1, padding: '16px', borderRadius: '12px', cursor: 'pointer',
                 border: `1px solid ${active ? 'var(--aurora-cyan)' : 'var(--border-subtle)'}`,
                 background: active ? 'var(--aurora-cyan-dim)' : 'rgba(0,0,0,0.2)',
@@ -166,11 +203,11 @@ export default function CompareModal({
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
           {[
             { label: 'DATASET ALPHA', val: idxA, setter: setIdxA, color: 'var(--aurora-cyan)' },
-            { label: 'DATASET BETA', val: idxB, setter: setIdxB, color: 'var(--aurora-magenta)' }
+            { label: 'DATASET BETA',  val: idxB, setter: setIdxB, color: 'var(--aurora-magenta)' }
           ].map(({ label, val, setter, color }) => (
             <div key={label} className="glass-panel" style={{ padding: '12px 16px', borderRadius: '12px', border: `1px solid ${color}33`, background: 'rgba(0,0,0,0.2)' }}>
               <div style={{ color, fontSize: '10px', fontFamily: 'var(--font-mono)', marginBottom: '8px', letterSpacing: '0.1em', fontWeight: 700 }}>{label}</div>
-              <select value={val} onChange={e => setter(Number(e.target.value))}
+              <select value={val} onChange={e => { setter(Number(e.target.value)); setExplanation(''); setExplainErr(''); }}
                 className="aurora-select"
                 style={{ width: '100%', background: 'transparent', color: '#fff', border: 'none', fontSize: '14px', fontFamily: 'var(--font-display)', fontWeight: 600 }}>
                 {timeSteps.map((t, i) => (
@@ -216,7 +253,6 @@ export default function CompareModal({
                   ))}
                 </div>
 
-                {/* Diff map */}
                 {diffData && (
                   <div style={{ marginBottom: '24px' }}>
                     <div style={{ color: 'var(--aurora-cyan)', fontFamily: 'var(--font-mono)', fontSize: '10px',
@@ -233,7 +269,8 @@ export default function CompareModal({
                                     border: '1px solid var(--border-subtle)', borderRadius: '100px',
                                     padding: '6px 16px', fontSize: '10px', color: 'var(--text-muted)', whiteSpace: 'nowrap',
                                     fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}>
-                        <span style={{ color: '#ef4444' }}>🔴 HIGHER IN ALPHA</span> &nbsp;·&nbsp; <span style={{ color: '#3b82f6' }}>🔵 HIGHER IN BETA</span> &nbsp;·&nbsp; WHITE = STABLE
+                        <span style={{ color: '#ef4444' }}>🔴 HIGHER IN ALPHA</span> &nbsp;·&nbsp;
+                        <span style={{ color: '#3b82f6' }}>🔵 HIGHER IN BETA</span> &nbsp;·&nbsp; WHITE = STABLE
                       </div>
                     </div>
                   </div>
@@ -256,7 +293,7 @@ export default function CompareModal({
                       <YAxis stroke="var(--text-muted)" tick={{ fill: 'var(--text-muted)', fontSize: 12, fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
                       <Tooltip content={<ChartTip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
                       <Legend verticalAlign="top" height={36} formatter={(value) => <span style={{ color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{value.toUpperCase()}</span>} />
-                      <Bar dataKey="A" name={`Year ${yearA}`} fill="var(--aurora-cyan)" radius={[4,4,0,0]} />
+                      <Bar dataKey="A" name={`Year ${yearA}`} fill="var(--aurora-cyan)"    radius={[4,4,0,0]} />
                       <Bar dataKey="B" name={`Year ${yearB}`} fill="var(--aurora-magenta)" radius={[4,4,0,0]} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -279,7 +316,7 @@ export default function CompareModal({
                       <YAxis stroke="var(--text-muted)" tick={{ fill: 'var(--text-muted)', fontSize: 12, fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
                       <Tooltip content={<ChartTip />} />
                       <Legend verticalAlign="top" height={36} formatter={(value) => <span style={{ color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{value.toUpperCase()}</span>} />
-                      <Line dataKey="A" name={`Year ${yearA}`} stroke="var(--aurora-cyan)" strokeWidth={3} dot={{ fill: 'var(--aurora-cyan)', r: 6, strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 8 }} />
+                      <Line dataKey="A" name={`Year ${yearA}`} stroke="var(--aurora-cyan)"    strokeWidth={3} dot={{ fill: 'var(--aurora-cyan)',    r: 6, strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 8 }} />
                       <Line dataKey="B" name={`Year ${yearB}`} stroke="var(--aurora-magenta)" strokeWidth={3} dot={{ fill: 'var(--aurora-magenta)', r: 6, strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 8 }} />
                     </LineChart>
                   </ResponsiveContainer>
@@ -292,12 +329,11 @@ export default function CompareModal({
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '24px' }}>
                 {[
                   { label: `MEAN Δ (${yearA}→${yearB})`, value: ((dataA.vmean ?? 0) - (dataB.vmean ?? 0)).toFixed(3) },
-                  { label: 'MAXIMUM VARIANCE',   value: diffData ? diffData.vmax?.toFixed(3) : '—' },
-                  { label: 'MINIMUM VARIANCE',   value: diffData ? diffData.vmin?.toFixed(3) : '—' },
+                  { label: 'MAXIMUM VARIANCE', value: diffData ? diffData.vmax?.toFixed(3) : '—' },
+                  { label: 'MINIMUM VARIANCE', value: diffData ? diffData.vmin?.toFixed(3) : '—' },
                 ].map(s => (
                   <div key={s.label} className="glass-panel" style={{ 
-                    background: 'rgba(0,0,0,0.3)',
-                    border: '1px solid var(--border-subtle)',
+                    background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-subtle)',
                     borderRadius: '12px', padding: '16px 20px', textAlign: 'center' 
                   }}>
                     <div style={{ color: 'var(--text-muted)', fontSize: '10px', fontFamily: 'var(--font-mono)', letterSpacing: '0.1em' }}>{s.label}</div>
@@ -308,22 +344,47 @@ export default function CompareModal({
               </div>
             )}
 
-            {/* Explain AI */}
+            {/* ── Explain AI ── */}
             <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '24px' }}>
-              <button className="btn-aurora" onClick={handleExplain} disabled={explaining || !dataA}
-                style={{ padding: '12px 24px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                className="btn-aurora"
+                onClick={handleExplain}
+                disabled={explaining || !dataA}
+                style={{ padding: '12px 24px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px',
+                         opacity: (!dataA) ? 0.4 : 1 }}
+              >
                 {explaining ? '⏳ ANALYSING DATA...' : '🧠 GENERATE AI INSIGHTS'}
               </button>
+
+              {/* Error display */}
+              <AnimatePresence>
+                {explainErr && (
+                  <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                    style={{ marginTop: '12px', padding: '12px 16px',
+                             background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+                             borderRadius: '10px', color: '#ef4444',
+                             fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+                    ⚠ {explainErr}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Explanation display */}
               <AnimatePresence>
                 {explanation && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
                     className="glass-panel"
-                    style={{ marginTop: '16px', padding: '20px', background: 'rgba(96,165,250,0.05)',
+                    style={{ marginTop: '16px', padding: '20px',
+                             background: 'rgba(96,165,250,0.05)',
                              border: '1px solid rgba(96,165,250,0.2)', borderRadius: '16px' }}>
                     <div style={{ color: '#60a5fa', fontSize: '10px', fontFamily: 'var(--font-mono)',
-                                  marginBottom: '10px', letterSpacing: '0.15em', fontWeight: 700 }}>NEURAL INTERPRETATION</div>
+                                  marginBottom: '10px', letterSpacing: '0.15em', fontWeight: 700 }}>
+                      NEURAL INTERPRETATION · {yearA} vs {yearB}
+                    </div>
                     <p style={{ color: '#fff', fontSize: '14px', lineHeight: 1.7, margin: 0,
-                                opacity: 0.9, whiteSpace: 'pre-wrap', fontFamily: 'var(--font-display)' }}>{explanation}</p>
+                                opacity: 0.9, whiteSpace: 'pre-wrap', fontFamily: 'var(--font-display)' }}>
+                      {explanation}
+                    </p>
                   </motion.div>
                 )}
               </AnimatePresence>

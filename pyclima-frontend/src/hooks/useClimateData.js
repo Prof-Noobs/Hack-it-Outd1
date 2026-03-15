@@ -3,14 +3,14 @@ import { useState, useCallback, useRef } from 'react';
 const API = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 export function useClimateData() {
-  const [fileInfo,    setFileInfo]    = useState(null);
-  const [variables,   setVariables]   = useState(['temperature','precipitation','wind']);
-  const [timeSteps,   setTimeSteps]   = useState([]);
-  const [heatData,    setHeatData]    = useState(null);
-  const [loading,     setLoading]     = useState(false);
-  const [error,       setError]       = useState(null);
-  const [chatMessages,setChatMessages]= useState([]);
-  const [chatLoading, setChatLoading] = useState(false);
+  const [fileInfo,     setFileInfo]     = useState(null);
+  const [variables,    setVariables]    = useState(['temperature','precipitation','wind']);
+  const [timeSteps,    setTimeSteps]    = useState([]);
+  const [heatData,     setHeatData]     = useState(null);
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatLoading,  setChatLoading]  = useState(false);
   const abortRef = useRef(null);
 
   const uploadFile = useCallback(async (file) => {
@@ -113,25 +113,84 @@ export function useClimateData() {
         body: JSON.stringify({ message, context }),
       });
       const data = await res.json();
-      const assistantMsg = { role: 'assistant', id: Date.now() + 1,
-        content: data.response || 'No response received.', error: data.error };
+      const assistantMsg = {
+        role: 'assistant', id: Date.now() + 1,
+        content: data.response || 'No response received.',
+        error: data.error,
+      };
       setChatMessages(prev => [...prev, assistantMsg]);
       return assistantMsg;
     } catch (e) {
       const errMsg = { role: 'assistant', content: `Error: ${e.message}`, id: Date.now() + 1, error: e.message };
-      setChatMessages(prev => [...prev, errMsg]); return null;
+      setChatMessages(prev => [...prev, errMsg]);
+      return null;
     } finally { setChatLoading(false); }
   }, []);
 
+  // ── explainGraph ────────────────────────────────────────────────────────────
+  // FIX: Normalize the `year` argument before sending to the backend.
+  //
+  // The backend ExplainRequest now has `year: Optional[str]` (after our api.py fix),
+  // but even with that, we sanitize here so the hook is safe regardless of caller:
+  //
+  //   DashboardPage calls:  explainGraph(selVar, curStep?.year, stats, region, 'heatmap')
+  //     → year is a number like 1998  ✓
+  //
+  //   CompareModal (old) called: explainGraph(variable, `${yearA} vs ${yearB}`, stats, ...)
+  //     → year was a string "1920 vs 2018" sent to int field  ✗  (was the crash)
+  //
+  //   CompareModal (fixed) calls: explainGraph(variable, null, stats, 'Global (A vs B)', type)
+  //     → year is null, region carries the context  ✓
+  //
+  // We convert numbers → strings, leave strings and null as-is, so the backend
+  // always receives either a plain string or null — never a bare JS number that
+  // Pydantic would previously reject as a non-int string.
   const explainGraph = useCallback(async (variable, year, stats, region, chartType) => {
+    // Normalize year: number → string, anything else passes through (null, string)
+    let safeYear = null;
+    if (year !== null && year !== undefined) {
+      safeYear = String(year); // "1998", "1920 vs 2018", etc.
+    }
+
+    // Sanitize stats: ensure all numeric values are plain JS numbers, not objects
+    let safeStats = null;
+    if (stats && typeof stats === 'object') {
+      safeStats = {
+        mean:  stats.mean  != null ? Number(stats.mean)  : null,
+        min:   stats.min   != null ? Number(stats.min)   : null,
+        max:   stats.max   != null ? Number(stats.max)   : null,
+        units: stats.units != null ? String(stats.units) : '',
+      };
+      // Drop null values so backend doesn't choke on them
+      Object.keys(safeStats).forEach(k => {
+        if (safeStats[k] === null) delete safeStats[k];
+      });
+    }
+
+    const payload = {
+      variable:   String(variable),
+      year:       safeYear,               // string | null
+      stats:      safeStats,              // clean dict | null
+      region:     region  || 'Global',
+      chart_type: chartType || 'heatmap',
+    };
+
     try {
       const res = await fetch(`${API}/explain`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ variable, year, stats, region, chart_type: chartType }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
+      if (!res.ok) {
+        console.error('Explain API error:', data);
+        return `Backend error: ${data.detail || JSON.stringify(data)}`;
+      }
       return data.explanation || 'Could not generate explanation.';
-    } catch (e) { return `Error: ${e.message}`; }
+    } catch (e) {
+      console.error('explainGraph fetch error:', e);
+      return `Network error: ${e.message}`;
+    }
   }, []);
 
   const clearChat = useCallback(() => setChatMessages([]), []);
